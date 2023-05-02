@@ -1,0 +1,142 @@
+---
+title: "Weather Forecast"
+author: "stasell3"
+date: "2023-04-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Import and Cleaning
+
+```{r data}
+#Data Cleaning
+library(daymetr)
+library(corrplot)
+library(astsa)
+library(xts)
+library(tsbox)
+library(forecast)
+library(ggplot2)
+library(tidyverse)
+
+initial_data <- download_daymet(
+                lat = 40.1164,
+                lon = -88.2434,
+                start = 1980,
+                end = 2022,
+                internal = TRUE)
+raw_data <- initial_data$data
+clean_data = raw_data %>% 
+  mutate(date = ymd(paste0(year, '01-01')) + days(yday) -1, 
+         precipitation = (prcp..mm.day. / 25.4), 
+         temp_max = (tmax..deg.c. * 9/5) + 32,
+         temp_min = (tmin..deg.c. * 9/5) + 32,
+         temp_avg = (temp_max + temp_min) / 2,
+         temp_range = temp_max - temp_min,
+         swave_rad = srad..W.m.2.,
+         vap_press = vp..Pa.) %>% 
+  dplyr::select(date, precipitation, temp_max, temp_min, temp_avg, temp_range, swave_rad, vap_press)
+
+
+data_month <- clean_data %>% 
+  dplyr::mutate(year = year(date), month = month(date)) %>% 
+  group_by(year, month) %>%
+  summarise(temp_avg = mean(temp_avg), .groups = 'keep') %>% 
+  ungroup() %>% 
+  dplyr::select(temp_avg, year, month)
+
+
+rm(initial_data, raw_data)
+
+```
+
+## Time Series Object Decomposition
+
+```{r ts}
+#Monthly Univariate Temp_Avg
+univar_ts_month <- ts(data_month$temp_avg,
+                      start = c(1980, 1),
+                      end = c(2022, 12),
+                      frequency = 12)
+
+#Decomposition WITHOUT Isolating Long Term Trend
+decomp_WOUT_ISO <- stl(univar_ts_month, s.window = 12)
+plot(decomp_WOUT_ISO)
+
+##Decomposition Isolating Long Term Trend
+decomp_ISO <- stl(univar_ts_month, s.window = 12, t.window = 15000)
+plot(decomp_ISO)
+
+```
+
+
+## Exploratory Data Analysis
+
+```{r ts1}
+#Computing and Displaying Average Monthly Temperature Means
+mavg = data_month %>%
+  group_by(month) %>% 
+  summarise(Avg = mean(temp_avg))
+plot(mavg$month, mavg$Avg, main="Average Monthly Temperatures", type="b", ylab = "Average Temperature (F)", xlab = "Month")
+
+#Constructing Correlation 
+numdata = clean_data %>% 
+  select(-c(date))
+cors = cor(numdata)
+corrplot(cors, method = "number")
+
+```
+
+## Impact of Differencing
+
+```{r univariate_ts}
+acf(univar_ts_month, 48)
+Box.test(univar_ts_month, type = "Ljung")
+DifferenceData = diff(univar_ts_month, 12)
+acf(DifferenceData, 48)
+```
+
+
+## SARIMA Model
+
+```{r AR}
+#Seasonal Differencing
+arima_fit_seas = auto.arima(univar_ts_month, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(arima_fit_seas))
+acf(arima_fit_seas$residuals, 48)
+Box.test(arima_fit_seas$residuals,lag = 1, type = "Ljung")
+
+#Avoiding Seasonal Differencing
+arima_fit_nonseas = auto.arima(univar_ts_month, D=0, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(arima_fit_nonseas))
+acf(arima_fit_nonseas$residuals, 48)
+Box.test(arima_fit_nonseas$residuals,lag = 1, type = "Ljung")
+
+#Seasonal and Non-Seasonal Differencing
+arima_fit_both_dif = auto.arima(univar_ts_month, d=1, D=1, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(arima_fit_both_dif))
+acf(arima_fit_both_dif$residuals, 48)
+Box.test(arima_fit_both_dif$residuals,lag = 1, type = "Ljung")
+
+#General Model
+arima_fit_gen = auto.arima(univar_ts_month, stepwise = FALSE, approximation = FALSE, trace = TRUE)
+print(summary(arima_fit_gen))
+acf(arima_fit_gen$residuals, 48)
+Box.test(arima_fit_gen$residuals,lag = 1, type = "Ljung")
+```
+
+
+## SARIMA Model Forecast
+
+```{r forecast}
+#SARIMA for General Season-Differencing Model Model 
+#(Best Model)
+sarima.for(univar_ts_month, 60,1,0,1,2,1,0,12)
+
+#SARIMA for Seasonal and Non-Seasonal Differencing Model
+sarima.for(univar_ts_month, 60,0,1,1,2,1,0,12)
+
+```
