@@ -1,4 +1,4 @@
-- 👋 Hi, I’m @stasell
+- 👋 Hi, I’m @stasetistics
 - 👀 I’m interested in sports data analytics
 - 🌱 I’m currently learning Python, R, SQL, and Tableau
 - 💞️ I’m looking to collaborate on football analytical projects.
